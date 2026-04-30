@@ -1,6 +1,6 @@
 ## Quick region stats from per-base BED files (qrs)
 
-A simple program for computing coverage statistics over a genomic region given a per-base BED file
+A simple program for computing coverage statistics over genomic regions given a per-base BED file
 and a BED file specifying regions for which to compute stats over. 
 
 ## Usage
