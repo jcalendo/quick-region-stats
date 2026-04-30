@@ -167,7 +167,7 @@ proc computeRegionStats(regionLengths: Table[string, int], regionTotalCov: Table
       if C > 0.0:
         var entropy = ln(C) - (logSum / C)
         if entropy < 0.0: entropy = 0.0 
-        stat.evenness = 100.0 * exp(entropy) / float(L)
+        stat.evenness = exp(entropy) / float(L)
 
     results[rId] = stat
     
