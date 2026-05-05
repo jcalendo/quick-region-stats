@@ -46,7 +46,7 @@ To build the script, a system installation of [htslib](https://www.htslib.org/do
 course [Nim](https://nim-lang.org/install.html) are required. Once these dependencies are met:
 
 ```{bash}
-https://github.com/jcalendo/quick-region-stats.git
+git clone https://github.com/jcalendo/quick-region-stats.git
 cd quick-region-stats
 
 # Fetch required Nim packages
