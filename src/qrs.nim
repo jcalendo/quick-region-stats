@@ -217,6 +217,6 @@ when isMainModule:
   dispatch main, help = {
     "bed": "Path to the mosdepth per-base bed.gz file",
     "regions": "Path to the input BED regions file to build interval trees over",
-    "thresholds": "Comma-separated list of coverage thresholds (e.g. 1,10,100,1000) to compute breadth fractions for",
+    "thresholds": "Comma-separated list of depth thresholds (e.g. 1,10,100,1000) to compute breadth fractions for",
     "output": "Optional path to save the TSV output. Defaults to stdout."
   }
