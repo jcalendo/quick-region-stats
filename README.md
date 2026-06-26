@@ -22,11 +22,11 @@ The program will output one line for each region in the regions.bed file with th
 - **region_id**: Name of the record in the BED file (if 'Name' column is present) 
 - **length**: Length of the region
 - **fraction_covered**: Fraction of bases in the region with depth > 0
-- **total_cov**: Total depth of the region
-- **min_cov**: Minimum depth observed
-- **max_cov**: maximum depth observed
-- **mean_cov**: Average depth
-- **median_cov**: Median depth
+- **total_depth**: Total depth of the region
+- **min_depth**: Minimum depth observed
+- **max_depth**: maximum depth observed
+- **mean_depth**: Average depth
+- **median_depth**: Median depth
 - **cv**: Coefficient of variation of the depth across the region
 - **evenness**: Normalized observed entropy
 - **F1,10,100,...**: Fraction of the region covered at 1x, 10x, 100x, etc.
