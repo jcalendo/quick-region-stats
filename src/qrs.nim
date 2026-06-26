@@ -9,7 +9,7 @@ type
     region_id*: string
 
   RegionStats = object
-    evenness, minCov, maxCov, meanCov, medianCov, fractionCovered, totalCov, cv: float
+    evenness, minDepth, maxDepth, meanDepth, medianDepth, fractionCovered, totalDepth, cv: float
     length: int
     breadths: seq[float]
 
@@ -22,10 +22,9 @@ proc buildRegionIndex(regionsBed: string): tuple[trees: Table[string, Lapper[Reg
     regionLengths = initTable[string, int]()
     f: HTSFile
 
-  try:
-    discard f.open(regionsBed, "r")
-  except Exception:
+  if not f.open(regionsBed, "r"):
     quit("Error: Could not open regions BED file " & regionsBed)
+  defer: f.close()
 
   var line = newStringOfCap(2048)
 
@@ -48,26 +47,22 @@ proc buildRegionIndex(regionsBed: string): tuple[trees: Table[string, Lapper[Reg
         regionDict[chrom] = @[]
       regionDict[chrom].add(RegionIv(startPos: start, stopPos: stop, region_id: regionId))
   
-  f.close()
-
   var trees = initTable[string, Lapper[RegionIv]]()
   for chrom, regions in regionDict.mpairs:
     trees[chrom] = lapify(regions)
     
   return (trees, regionLengths)
 
-
-proc parseBedCoverage(bedFile: string, trees: var Table[string, Lapper[RegionIv]]): tuple[totalCov: Table[string, float], logSum: Table[string, float], covBlocks: Table[string, seq[tuple[c: float, w: int]]]] =
+proc parseBedCoverage(bedFile: string, trees: var Table[string, Lapper[RegionIv]]): tuple[totalDepth: Table[string, float], logSum: Table[string, float], depthBlocks: Table[string, seq[tuple[c: float, w: int]]]] =
   var 
-    regionTotalCov = initTable[string, float]()
+    regionTotalDepth = initTable[string, float]()
     regionLogSum = initTable[string, float]()
-    regionCovBlocks = initTable[string, seq[tuple[c: float, w: int]]]()
+    regionDepthBlocks = initTable[string, seq[tuple[c: float, w: int]]]()
     f: HTSFile
 
-  try:
-    discard f.open(bedFile, "r")
-  except Exception:
+  if not f.open(bedFile, "r"):
     quit("Error: Could not open coverage BED file " & bedFile)
+  defer: f.close()
 
   var line = newStringOfCap(2048)
   while f.readLine(line):
@@ -89,35 +84,34 @@ proc parseBedCoverage(bedFile: string, trees: var Table[string, Lapper[RegionIv]
       let width = float(overlapStop - overlapStart)
 
       if width > 0.0:
-        regionTotalCov[rId] = regionTotalCov.getOrDefault(rId, 0.0) + (width * cov)
+        regionTotalDepth[rId] = regionTotalDepth.getOrDefault(rId, 0.0) + (width * cov)
         regionLogSum[rId] = regionLogSum.getOrDefault(rId, 0.0) + (width * cov * ln(cov))
         
-        if not regionCovBlocks.hasKey(rId): regionCovBlocks[rId] = @[]
-        regionCovBlocks[rId].add((cov, int(width)))
+        if not regionDepthBlocks.hasKey(rId): regionDepthBlocks[rId] = @[]
+        regionDepthBlocks[rId].add((cov, int(width)))
 
-  f.close()
-  return (regionTotalCov, regionLogSum, regionCovBlocks)
+  return (regionTotalDepth, regionLogSum, regionDepthBlocks)
 
-proc computeRegionStats(regionLengths: Table[string, int], regionTotalCov: Table[string, float], regionLogSum: Table[string, float], regionCovBlocks: Table[string, seq[tuple[c: float, w: int]]], thresholds: seq[int]): Table[string, RegionStats] =
+proc computeRegionStats(regionLengths: Table[string, int], regionTotalDepth: Table[string, float], regionLogSum: Table[string, float], regionDepthBlocks: Table[string, seq[tuple[c: float, w: int]]], thresholds: seq[int]): Table[string, RegionStats] =
   var results = initTable[string, RegionStats]()
   
   for rId, L in regionLengths:
-    let C = regionTotalCov.getOrDefault(rId, 0.0)
+    let C = regionTotalDepth.getOrDefault(rId, 0.0)
     let logSum = regionLogSum.getOrDefault(rId, 0.0)
-    let blocks = regionCovBlocks.getOrDefault(rId, @[])
+    let blocks = regionDepthBlocks.getOrDefault(rId, @[])
     
-    var stat = RegionStats(length: L, evenness: 0.0, minCov: 0.0, maxCov: 0.0, meanCov: 0.0, medianCov: 0.0, fractionCovered: 0.0, totalCov: C, cv: 0.0)
+    var stat = RegionStats(length: L, evenness: 0.0, minDepth: 0.0, maxDepth: 0.0, meanDepth: 0.0, medianDepth: 0.0, fractionCovered: 0.0, totalDepth: C, cv: 0.0)
     stat.breadths = newSeq[float](thresholds.len)
     
     if L > 0:
-      stat.meanCov = C / float(L)
+      stat.meanDepth = C / float(L)
       
       var fullBlocks = blocks
       var covered = 0
       for b in blocks: covered += b.w
       stat.fractionCovered = float(covered) / float(L)
       
-      # Add 0-coverage block if region isn't fully covered
+      # Add 0-depth block if region isn't fully covered
       if covered < L:
         fullBlocks.add((0.0, L - covered))
         
@@ -125,8 +119,8 @@ proc computeRegionStats(regionLengths: Table[string, int], regionTotalCov: Table
       fullBlocks.sort(proc(x, y: tuple[c: float, w: int]): int = cmp(x.c, y.c))
       
       if fullBlocks.len > 0:
-        stat.minCov = fullBlocks[0].c
-        stat.maxCov = fullBlocks[^1].c
+        stat.minDepth = fullBlocks[0].c
+        stat.maxDepth = fullBlocks[^1].c
         
         let mid1 = (L - 1) div 2
         let mid2 = L div 2
@@ -144,7 +138,7 @@ proc computeRegionStats(regionLengths: Table[string, int], regionTotalCov: Table
           current += b.w
           
           # Variance logic
-          let diff = b.c - stat.meanCov
+          let diff = b.c - stat.meanDepth
           sumSqDiff += (diff * diff) * float(b.w)
 
           # Breadth thresholds logic
@@ -152,12 +146,12 @@ proc computeRegionStats(regionLengths: Table[string, int], regionTotalCov: Table
             if b.c >= float(t):
               thresholdCounts[i] += b.w
           
-        stat.medianCov = (med1 + med2) / 2.0
+        stat.medianDepth = (med1 + med2) / 2.0
         
         # Finalize CV
         let variance = sumSqDiff / float(L)
-        if stat.meanCov > 0.0:
-          stat.cv = sqrt(variance) / stat.meanCov
+        if stat.meanDepth > 0.0:
+          stat.cv = sqrt(variance) / stat.meanDepth
           
         # Finalize Breadths
         for i in 0 ..< thresholds.len:
@@ -175,8 +169,8 @@ proc computeRegionStats(regionLengths: Table[string, int], regionTotalCov: Table
 
 proc main(bed: string, regions: string, thresholds: seq[int] = @[1, 10, 100, 1000], output: string = "") =
   var (trees, regionLengths) = buildRegionIndex(regions)
-  let (regionTotalCov, regionLogSum, regionCovBlocks) = parseBedCoverage(bed, trees)
-  let stats = computeRegionStats(regionLengths, regionTotalCov, regionLogSum, regionCovBlocks, thresholds)
+  let (regionTotalDepth, regionLogSum, regionDepthBlocks) = parseBedCoverage(bed, trees)
+  let stats = computeRegionStats(regionLengths, regionTotalDepth, regionLogSum, regionDepthBlocks, thresholds)
 
   var outStream: File
   if output.len > 0:
@@ -185,8 +179,12 @@ proc main(bed: string, regions: string, thresholds: seq[int] = @[1, 10, 100, 100
   else:
     outStream = stdout 
 
+  defer:
+    if output.len > 0:
+      outStream.close()
+
   # Build dynamic header
-  var header = "region_id\tlength\tfraction_covered\ttotal_cov\tmin_cov\tmax_cov\tmean_cov\tmedian_cov\tcv"
+  var header = "region_id\tlength\tfraction_covered\ttotal_depth\tmin_depth\tmax_depth\tmean_depth\tmedian_depth\tcv"
   for t in thresholds:
     header &= "\tF" & $t
   header &= "\tevenness"
@@ -198,20 +196,17 @@ proc main(bed: string, regions: string, thresholds: seq[int] = @[1, 10, 100, 100
     outStream.write(rId, "\t", 
                     s.length, "\t", 
                     formatFloat(s.fractionCovered, ffDecimal, 4), "\t",
-                    formatFloat(s.totalCov, ffDecimal, 2), "\t",
-                    formatFloat(s.minCov, ffDecimal, 2), "\t",
-                    formatFloat(s.maxCov, ffDecimal, 2), "\t",
-                    formatFloat(s.meanCov, ffDecimal, 2), "\t",
-                    formatFloat(s.medianCov, ffDecimal, 2), "\t",
+                    formatFloat(s.totalDepth, ffDecimal, 2), "\t",
+                    formatFloat(s.minDepth, ffDecimal, 2), "\t",
+                    formatFloat(s.maxDepth, ffDecimal, 2), "\t",
+                    formatFloat(s.meanDepth, ffDecimal, 2), "\t",
+                    formatFloat(s.medianDepth, ffDecimal, 2), "\t",
                     formatFloat(s.cv, ffDecimal, 4))
     
     for b in s.breadths:
       outStream.write("\t", formatFloat(b, ffDecimal, 4))
       
     outStream.writeLine("\t", formatFloat(s.evenness, ffDecimal, 2))
-
-  if output.len > 0:
-    outStream.close()
 
 when isMainModule:
   dispatch main, help = {
