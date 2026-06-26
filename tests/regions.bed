@@ -1,0 +1,4 @@
+chr1	1000	1100	reg_uniform
+chr1	2000	2100	reg_variable
+chr1	3000	3100	reg_partial
+chr2	1000	1100	reg_empty
