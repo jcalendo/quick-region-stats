@@ -7,7 +7,7 @@ and a BED file specifying regions for which to compute stats over.
 
 ```{bash}
 Usage:
-  main [REQUIRED,optional-params] 
+  qrs [REQUIRED] [optional] 
 Options:
   -h, --help                                 print this cligen-erated help
   --help-syntax                              advanced: prepend,plurals,..
