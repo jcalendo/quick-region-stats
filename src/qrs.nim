@@ -10,23 +10,25 @@ type
     startPos, stopPos: int
     idx: int
 
-  DepthBlock = tuple[depth: float, width: int]
+  DepthBlock* = tuple[depth: float, width: int]
 
-  Region = object
-    ## Per-region accumulator, filled while streaming the per-base BED.
-    id: string
-    length: int
-    totalDepth: float
+  Region* = object
+    ## One record from the regions BED, plus accumulators filled while
+    ## streaming the per-base BED.
+    id*: string
+    chrom*: string
+    startPos*, stopPos*: int
+    totalDepth*: float
     logSum: float            # sum of width * depth * ln(depth), used for evenness
     blocks: seq[DepthBlock]
 
-  RegionStats = object
-    length: int
-    fractionCovered, totalDepth, minDepth, maxDepth: float
-    meanDepth, medianDepth, cv, evenness: float
-    breadths: seq[float]
+  RegionStats* = object
+    length*: int
+    fractionCovered*, totalDepth*, minDepth*, maxDepth*: float
+    meanDepth*, medianDepth*, cv*, evenness*: float
+    breadths*: seq[float]
 
-  Trees = Table[string, Lapper[RegionIv]]
+  Trees* = Table[string, Lapper[RegionIv]]
 
 proc start(iv: RegionIv): int {.inline.} = iv.startPos
 proc stop(iv: RegionIv): int {.inline.} = iv.stopPos
@@ -35,27 +37,21 @@ proc openOrQuit(path, what: string): HTSFile =
   if not result.open(path, "r"):
     quit(&"Error: Could not open {what} {path}")
 
-proc mergeIntervals(ivs: var seq[(string, int, int)]): seq[(string, int, int)] =
-  ## Sort and merge overlapping/abutting intervals so bases are never counted twice.
-  ivs.sort()
-  for (chrom, s, e) in ivs:
-    if result.len > 0 and result[^1][0] == chrom and s <= result[^1][2]:
-      result[^1][2] = max(result[^1][2], e)
-    else:
-      result.add((chrom, s, e))
+proc length*(r: Region): int {.inline.} = r.stopPos - r.startPos
 
-proc buildRegionIndex(regionsBed: string): (Trees, seq[Region]) =
-  ## Read the regions BED. Records sharing a name are aggregated into one region,
-  ## and output order follows first appearance in the file.
+proc buildRegionIndex*(regionsBed: string): (Trees, seq[Region]) =
+  ## Read the regions BED. Each valid record is its own region and output
+  ## order matches the file. Records with invalid coordinates are skipped.
   var
     f = openOrQuit(regionsBed, "regions BED file")
     regions: seq[Region]
-    idxById: Table[string, int]
-    rawIvs: seq[seq[(string, int, int)]]   # per region: (chrom, start, stop)
+    ivsByChrom: Table[string, seq[RegionIv]]
     line = newStringOfCap(2048)
+    lineNum = 0
   defer: f.close()
 
   while f.readLine(line):
+    inc lineNum
     let line = line.strip()
     if line.len == 0 or line.startsWith("#") or line.startsWith("track") or
        line.startsWith("browser"):
@@ -63,34 +59,31 @@ proc buildRegionIndex(regionsBed: string): (Trees, seq[Region]) =
     let cols = line.split('\t')
     if cols.len < 3: continue
 
-    let
-      chrom = cols[0]
+    let chrom = cols[0]
+    var start, stop: int
+    try:
       start = parseInt(cols[1])
       stop = parseInt(cols[2])
-    if stop <= start:
-      quit(&"Error: invalid interval {chrom}:{start}-{stop} in {regionsBed}")
+    except ValueError:
+      stderr.writeLine(&"Warning: skipping {regionsBed}:{lineNum}, non-integer coordinates")
+      continue
+    if start < 0 or stop <= start:
+      stderr.writeLine(&"Warning: skipping {regionsBed}:{lineNum}, invalid interval {chrom}:{start}-{stop}")
+      continue
 
     let id = if cols.len > 3 and cols[3].strip().len > 0: cols[3].strip()
              else: &"{chrom}:{start}-{stop}"
 
-    let idx = idxById.mgetOrPut(id, regions.len)
-    if idx == regions.len:
-      regions.add(Region(id: id))
-      rawIvs.add(@[])
-    rawIvs[idx].add((chrom, start, stop))
-
-  var ivsByChrom: Table[string, seq[RegionIv]]
-  for idx, ivs in rawIvs.mpairs:
-    for (chrom, s, e) in mergeIntervals(ivs):
-      regions[idx].length += e - s
-      ivsByChrom.mgetOrPut(chrom, @[]).add(RegionIv(startPos: s, stopPos: e, idx: idx))
+    ivsByChrom.mgetOrPut(chrom, @[]).add(
+      RegionIv(startPos: start, stopPos: stop, idx: regions.len))
+    regions.add(Region(id: id, chrom: chrom, startPos: start, stopPos: stop))
 
   var trees: Trees
   for chrom, ivs in ivsByChrom.mpairs:
     trees[chrom] = lapify(ivs)
   (trees, regions)
 
-proc accumulateDepth(bedFile: string, trees: var Trees, regions: var seq[Region]) =
+proc accumulateDepth*(bedFile: string, trees: var Trees, regions: var seq[Region]) =
   ## Stream the per-base BED and add each block's overlap to its region(s).
   var
     f = openOrQuit(bedFile, "coverage BED file")
@@ -116,7 +109,7 @@ proc accumulateDepth(bedFile: string, trees: var Trees, regions: var seq[Region]
           regions[iv.idx].logSum += w * depth * logDepth
           regions[iv.idx].blocks.add((depth, width))
 
-proc computeStats(r: Region, thresholds: seq[int]): RegionStats =
+proc computeStats*(r: Region, thresholds: seq[int]): RegionStats =
   let L = r.length
   result = RegionStats(length: L, totalDepth: r.totalDepth,
                        breadths: newSeq[float](thresholds.len))
@@ -173,17 +166,18 @@ proc main(bed: string, regions: string, thresholds: seq[int] = @[1, 10, 100, 100
   defer:
     if outStream != stdout: outStream.close()
 
-  var header = @["region_id", "length", "fraction_covered", "total_depth", "min_depth",
-                 "max_depth", "mean_depth", "median_depth", "cv"]
+  var header = @["chrom", "start", "end", "region_id", "length", "fraction_covered",
+                 "total_depth", "min_depth", "max_depth", "mean_depth", "median_depth", "cv"]
   for t in thresholds: header.add(&"F{t}")
   header.add("evenness")
   outStream.writeLine(header.join("\t"))
 
   for r in regs:
     let s = computeStats(r, thresholds)
-    var row = @[r.id, $s.length, &"{s.fractionCovered:.4f}", &"{s.totalDepth:.2f}",
-                &"{s.minDepth:.2f}", &"{s.maxDepth:.2f}", &"{s.meanDepth:.2f}",
-                &"{s.medianDepth:.2f}", &"{s.cv:.4f}"]
+    var row = @[r.chrom, $r.startPos, $r.stopPos, r.id, $s.length,
+                &"{s.fractionCovered:.4f}", &"{s.totalDepth:.2f}", &"{s.minDepth:.2f}",
+                &"{s.maxDepth:.2f}", &"{s.meanDepth:.2f}", &"{s.medianDepth:.2f}",
+                &"{s.cv:.4f}"]
     for b in s.breadths: row.add(&"{b:.4f}")
     row.add(&"{s.evenness:.2f}")
     outStream.writeLine(row.join("\t"))

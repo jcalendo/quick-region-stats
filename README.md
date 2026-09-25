@@ -17,9 +17,13 @@ Options:
   -o=, --output=      string  ""             Optional path to save the TSV output. Defaults to stdout.
 ```
 
-The program will output one line for each region in the regions.bed file with the following columns:
+The program will output one line for each valid record in the regions.bed file, in the same order
+as the input. Each record is treated as its own region, even if several records share a name.
+Records with invalid coordinates (non-integer, negative start, or end <= start) are skipped with a
+warning on stderr. The output has the following columns:
 
-- **region_id**: Name of the record in the BED file (if 'Name' column is present) 
+- **chrom**, **start**, **end**: Coordinates of the region, as given in the BED file
+- **region_id**: Name of the record in the BED file (if 'Name' column is present), otherwise `chrom:start-end`
 - **length**: Length of the region
 - **fraction_covered**: Fraction of bases in the region with depth > 0
 - **total_depth**: Total depth of the region
@@ -28,8 +32,8 @@ The program will output one line for each region in the regions.bed file with th
 - **mean_depth**: Average depth
 - **median_depth**: Median depth
 - **cv**: Coefficient of variation of the depth across the region
-- **evenness**: Normalized observed entropy
 - **F1,10,100,...**: Fraction of the region covered at 1x, 10x, 100x, etc.
+- **evenness**: Normalized observed entropy
 
 ### Example
 
